@@ -26,7 +26,7 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    const targetContent = 'JadeBot';
+    const targetContent = 'ExampleBot'; // Replace with your bot's name
     const lowerCaseMessage = message.content.toLowerCase();
 
     if (lowerCaseMessage.includes(targetContent.toLowerCase()) || message.mentions.has(client.user)) {
