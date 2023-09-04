@@ -12,7 +12,7 @@ const client = new Client({
 });
 
 const serverUserMessageEndpoint = 'http://localhost:4000/userMessage'; // Endpoint to send user messages
-const serverAssistantResponseEndpoint = 'http://localhost.de:4000/assistantResponse'; // Endpoint to receive responses
+const serverAssistantResponseEndpoint = 'http://localhost:4000/assistantResponse'; // Endpoint to receive responses
 
 const eventEmitter = new EventEmitter();
 
