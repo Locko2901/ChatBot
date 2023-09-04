@@ -96,7 +96,7 @@ if (username === 'ExampleName') {
 
     const historyTokens = countTokens(sharedConversationHistory);
 
-    const availableTokens = maxTotalTokens - historyTokens - personalityPromptTokens - 100;
+    const availableTokens = maxTotalTokens - historyTokens - personalityPromptTokens - 500;
 
     console.log('Current Message Tokens:', currentMessageTokens);
     console.log('History Tokens:', historyTokens);
