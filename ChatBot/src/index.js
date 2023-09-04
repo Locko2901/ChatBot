@@ -10,6 +10,8 @@ const port = 4000;
 const eventEmitter = new EventEmitter();
 
 const maxTotalTokens = 4096; 
+const bufferTokens = 800;
+const safety = 100;
 
 let personalityPrompt = `
   You are a Bot. 
@@ -68,85 +70,95 @@ app.post('/userMessage', async (req, res) => {
   console.log('Username:', username);
   console.log('User Message:', messageContent);
 
-// Set usernames you want the bot to recognize
-if (username === 'ExampleName') {
-  chatPrompt = personalityPrompt.replace(creatorgfIntroduction + '\n', '');
-  if (!chatPrompt.includes(creatorIntroduction)) {
-    chatPrompt += '\n' + creatorIntroduction;
+  // Set usernames you want the bot to recognize
+  if (username === 'ExampleName') {
+    chatPrompt = personalityPrompt.replace(creatorgfIntroduction + '\n', '');
+    if (!chatPrompt.includes(creatorIntroduction)) {
+      chatPrompt += '\n' + creatorIntroduction;
+    }
+  } else if (username === 'ExampleName1') {
+    chatPrompt = personalityPrompt.replace(creatorIntroduction + '\n', '');
+    if (!chatPrompt.includes(creatorgfIntroduction)) {
+      chatPrompt += '\n' + creatorgfIntroduction;
+    }
+  } else {
+    chatPrompt = personalityPrompt
+      .replace(creatorIntroduction + '\n', '')
+      .replace(creatorgfIntroduction + '\n', '');
   }
-} else if (username === 'ExampleName1') {
-  chatPrompt = personalityPrompt.replace(creatorIntroduction + '\n', '');
-  if (!chatPrompt.includes(creatorgfIntroduction)) {
-    chatPrompt += '\n' + creatorgfIntroduction;
-  }
-} else {
-  chatPrompt = personalityPrompt
-    .replace(creatorIntroduction + '\n', '')
-    .replace(creatorgfIntroduction + '\n', '');
-}
 
   console.log('Prompt:', chatPrompt);
 
   const messageBatches = splitLongMessages(messageContent);
 
+  const personalityPromptTokens = countTokens([{ content: chatPrompt }]);
+
+  const userMessageHistory = sharedConversationHistory.filter((message) => message.role === 'user');
+  const assistantMessageHistory = sharedConversationHistory.filter((message) => message.role === 'assistant');
+
+  let userMessageTokens = countTokens(userMessageHistory);
+  let assistantMessageTokens = countTokens(assistantMessageHistory);
+
+  const availableTokens = maxTotalTokens - personalityPromptTokens - userMessageTokens - assistantMessageTokens;
+
   messageBatches.forEach((batch) => {
     const currentMessageTokens = countTokens([{ content: batch }]);
 
-    const personalityPromptTokens = countTokens([{ content: chatPrompt }]);
-
-    const historyTokens = countTokens(sharedConversationHistory);
-
-    const availableTokens = maxTotalTokens - historyTokens - personalityPromptTokens - 500;
-
     console.log('Current Message Tokens:', currentMessageTokens);
-    console.log('History Tokens:', historyTokens);
+    console.log('User Message Tokens:', userMessageTokens);
+    console.log('Assistant Message Tokens:', assistantMessageTokens);
     console.log('Available Tokens:', availableTokens);
 
-    if (currentMessageTokens > availableTokens) {
-      while (countTokens(sharedConversationHistory) + currentMessageTokens > maxTotalTokens) {
-        const removedMessage = sharedConversationHistory.shift();
-        console.log('Removing Message from Conversation History:', removedMessage.content);
+    while (currentMessageTokens + userMessageTokens + assistantMessageTokens > maxConvTokens) {
+      if (userMessageTokens > assistantMessageTokens) {
+        const removedMessage = userMessageHistory.shift();
+        userMessageTokens -= countTokens([{ content: removedMessage.content }]);
+      } else {
+        const removedMessage = assistantMessageHistory.shift();
+        assistantMessageTokens -= countTokens([{ content: removedMessage.content }]);
       }
     }
 
-    sharedConversationHistory.push({ role: 'user', username: username, content: batch });
-    console.log('Conversation History:', sharedConversationHistory);
-    console.log('Conversation History Tokens:', countTokens(sharedConversationHistory));
+    userMessageHistory.push({ role: 'user', username: username, content: batch });
+    userMessageTokens += currentMessageTokens;
+
+    console.log('User Message History:', userMessageHistory);
+    console.log('User Message Tokens After Adding:', userMessageTokens);
   });
+
+  sharedConversationHistory = [...userMessageHistory, ...assistantMessageHistory];
 
   eventEmitter.emit('userMessage', { userAttribution: 'user', userQuery: messageContent });
 
-  const chatbotResponses = await generateResponses(messageBatches);
+  const chatbotResponses = await generateResponses(messageBatches, userMessageHistory, assistantMessageHistory);
 
   chatbotResponses.forEach((response) => {
     const responseTokens = countTokens([{ content: response }]);
 
-    const historyTokensAfterResponse = countTokens(sharedConversationHistory) + responseTokens;
-
-    console.log('Response Tokens:', responseTokens);
-    console.log('History Tokens After Response:', historyTokensAfterResponse);
-
-    while (historyTokensAfterResponse > maxTotalTokens) {
-      const removedMessage = sharedConversationHistory.shift();
-      console.log('Removing Message from Conversation History:', removedMessage.content);
-      historyTokensAfterResponse = countTokens(sharedConversationHistory) + responseTokens;
+    while (responseTokens + userMessageTokens + assistantMessageTokens > maxConvTokens) {
+      if (userMessageTokens > assistantMessageTokens) {
+        const removedMessage = userMessageHistory.shift();
+        userMessageTokens -= countTokens([{ content: removedMessage.content }]);
+      } else {
+        const removedMessage = assistantMessageHistory.shift();
+        assistantMessageTokens -= countTokens([{ content: removedMessage.content }]);
+      }
     }
 
-    sharedConversationHistory.push({ role: 'assistant', content: response });
-    console.log('Conversation History Tokens After Response:', historyTokensAfterResponse);
+    assistantMessageHistory.push({ role: 'assistant', content: response });
+    assistantMessageTokens += responseTokens;
+
+    console.log('Assistant Message History:', assistantMessageHistory);
+    console.log('Assistant Message Tokens After Adding:', assistantMessageTokens);
     console.log('Chatbot Response:', response);
   });
+
+  sharedConversationHistory = [...userMessageHistory, ...assistantMessageHistory];
 
   res.json({ message: 'Message received by the server.', chatbotResponse: chatbotResponses });
 });
 
-app.post('/assistantResponse', (req, res) => {
-  const assistantResponse = req.body.assistantResponse;
-
-  res.json({ message: 'Response received by the server.' });
-});
-
-async function generateResponses(messageBatches) {
+async function generateResponses(messageBatches, userMessageHistory, assistantMessageHistory) {
   const responses = [];
 
   for (const batch of messageBatches) {
@@ -155,13 +167,18 @@ async function generateResponses(messageBatches) {
         model: 'gpt-3.5-turbo',
         messages: [
           { role: 'system', content: chatPrompt },
-          ...sharedConversationHistory.map((message) => ({
+          ...userMessageHistory.map((message) => ({
             role: message.role,
             content: message.content,
           })),
+          ...assistantMessageHistory.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          { role: 'user', content: batch },
         ],
         temperature: 0.7,
-        max_tokens: 1500, 
+        max_tokens: 750,
       });
 
       responses.push(response.choices[0].message.content);
