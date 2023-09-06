@@ -10,8 +10,7 @@ const port = 4000;
 const eventEmitter = new EventEmitter();
 
 const maxTotalTokens = 4096; 
-const bufferTokens = 800;
-const safety = 100;
+const maxConvTokens = 3020;
 
 let personalityPrompt = `
   You are a Bot. 
@@ -34,7 +33,8 @@ const openai = new OpenAI({ apiKey: openaiAPIKey });
 const countTokens = (messages) => {
   return messages.reduce((totalTokens, message) => {
     if (message.content) {
-      return totalTokens + message.content.split(' ').length;
+      const tokenCount = message.content.split(' ').length; 
+      return totalTokens + tokenCount;
     }
     return totalTokens;
   }, 0);
