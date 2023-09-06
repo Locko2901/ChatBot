@@ -34,7 +34,21 @@ client.on('messageCreate', async (message) => {
         
         const data = {
             userQuery: messageContent,
+            server: message.guild.name, 
         };
+
+        messageQueue.push({ message, data });
+
+        if (!isProcessing) {
+            processNextMessage();
+        }
+    }
+});
+
+async function processNextMessage() {
+    if (messageQueue.length > 0) {
+        isProcessing = true;
+        const { message, data } = messageQueue.shift();
 
         try {
             message.channel.sendTyping();
@@ -54,8 +68,11 @@ client.on('messageCreate', async (message) => {
             console.error('Error sending/receiving messages:', error.message);
             message.reply('An error occurred while communicating with the server.');
         }
+
+        isProcessing = false;
+        processNextMessage(); 
     }
-});
+}
 
 eventEmitter.on('botResponse', async (responseData) => {
     const responseBatch = responseData.responseBatch;
