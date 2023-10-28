@@ -195,7 +195,7 @@ async function generateResponses(messageBatches, userMessageHistory, assistantMe
   return responses;
 }
 
-https.createServer(serverOptions, app).listen(port, () => {
+app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
 
