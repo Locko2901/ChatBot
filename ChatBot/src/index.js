@@ -3,14 +3,27 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const { EventEmitter } = require('events');
 const cors = require('cors');
+const {
+  saveConversationHistoryToFile,
+  loadConversationHistoryFromFile,
+  pruneConversationHistory,
+} = require('./conversationHistory');
 
 const app = express();
 const port = 4000;
 
 const eventEmitter = new EventEmitter();
 
-const maxTotalTokens = 4096; 
-const maxConvTokens = 3020;
+let sharedConversationHistory = loadConversationHistoryFromFile();
+
+// Define the maximum history size and maximum message count
+const maxHistorySize = 10 * 1024 * 1024; // Maximum size in bytes (e.g., 10 MB)
+const maxMessageCount = 1000; // Maximum number of messages
+
+pruneConversationHistory(sharedConversationHistory, maxHistorySize, maxMessageCount);
+
+const maxTotalTokens = 50000; 
+const maxConvTokens = 10000; //Adjust as needed
 
 let personalityPrompt = `
   You are a Bot. 
@@ -21,8 +34,6 @@ const creatorIntroduction = `Sample`;
 const creatorgfIntroduction = `Sample!`
 
 let chatPrompt = personalityPrompt;
-
-let sharedConversationHistory = [];
 
 app.use(bodyParser.json());
 app.use(cors());
@@ -61,37 +72,40 @@ const splitLongMessages = (messageContent) => {
   return messageBatches;
 };
 
+let userPrompts = {}; 
+let userPrompt;
+
 app.post('/userMessage', async (req, res) => {
   const userMessage = req.body.userQuery;
-
+  const server = req.body.server;
   const username = userMessage.split(':')[0];
-  const messageContent = userMessage.split(':')[1];
+  let messageContent = userMessage.split(':')[1];
 
   console.log('Username:', username);
   console.log('User Message:', messageContent);
+  console.log('Server', server);
 
-  // Set usernames you want the bot to recognize
-  if (username === 'ExampleName') {
-    chatPrompt = personalityPrompt.replace(creatorgfIntroduction + '\n', '');
-    if (!chatPrompt.includes(creatorIntroduction)) {
-      chatPrompt += '\n' + creatorIntroduction;
-    }
-  } else if (username === 'ExampleName1') {
-    chatPrompt = personalityPrompt.replace(creatorIntroduction + '\n', '');
-    if (!chatPrompt.includes(creatorgfIntroduction)) {
-      chatPrompt += '\n' + creatorgfIntroduction;
-    }
-  } else {
-    chatPrompt = personalityPrompt
-      .replace(creatorIntroduction + '\n', '')
-      .replace(creatorgfIntroduction + '\n', '');
+  if (!userPrompts[username]) {
+    userPrompts[username] = personalityPrompt;
   }
 
-  console.log('Prompt:', chatPrompt);
+  userPrompt = userPrompts[username];
+
+  if (username === 'Examplename') { //Select username 
+    if (!userPrompt.includes(creatorIntroduction)) {
+      userPrompt += '\n' + creatorIntroduction;
+    }
+  } else if (username === 'Examplename1') { //select username
+    if (!userPrompt.includes(creatorgfIntroduction)) {
+      userPrompt += '\n' + creatorgfIntroduction;
+    }
+  }
+
+  console.log('Prompt:', userPrompt);
 
   const messageBatches = splitLongMessages(messageContent);
 
-  const personalityPromptTokens = countTokens([{ content: chatPrompt }]);
+  const personalityPromptTokens = countTokens([{ content: userPrompt }]);
 
   const userMessageHistory = sharedConversationHistory.filter((message) => message.role === 'user');
   const assistantMessageHistory = sharedConversationHistory.filter((message) => message.role === 'assistant');
@@ -104,11 +118,6 @@ app.post('/userMessage', async (req, res) => {
   messageBatches.forEach((batch) => {
     const currentMessageTokens = countTokens([{ content: batch }]);
 
-    console.log('Current Message Tokens:', currentMessageTokens);
-    console.log('User Message Tokens:', userMessageTokens);
-    console.log('Assistant Message Tokens:', assistantMessageTokens);
-    console.log('Available Tokens:', availableTokens);
-
     while (currentMessageTokens + userMessageTokens + assistantMessageTokens > maxConvTokens) {
       if (userMessageTokens > assistantMessageTokens) {
         const removedMessage = userMessageHistory.shift();
@@ -119,11 +128,8 @@ app.post('/userMessage', async (req, res) => {
       }
     }
 
-    userMessageHistory.push({ role: 'user', username: username, content: batch });
+    userMessageHistory.push({ role: 'user', username: username, server: server, content: batch });
     userMessageTokens += currentMessageTokens;
-
-    console.log('User Message History:', userMessageHistory);
-    console.log('User Message Tokens After Adding:', userMessageTokens);
   });
 
   sharedConversationHistory = [...userMessageHistory, ...assistantMessageHistory];
@@ -147,16 +153,16 @@ app.post('/userMessage', async (req, res) => {
 
     assistantMessageHistory.push({ role: 'assistant', content: response });
     assistantMessageTokens += responseTokens;
-
-    console.log('Assistant Message History:', assistantMessageHistory);
-    console.log('Assistant Message Tokens After Adding:', assistantMessageTokens);
-    console.log('Chatbot Response:', response);
   });
 
   sharedConversationHistory = [...userMessageHistory, ...assistantMessageHistory];
 
+  saveConversationHistoryToFile(sharedConversationHistory);
+
   res.json({ message: 'Message received by the server.', chatbotResponse: chatbotResponses });
 });
+
+const systemMessage = `Do not break character!`; //Replace with any instruction you want to add
 
 async function generateResponses(messageBatches, userMessageHistory, assistantMessageHistory) {
   const responses = [];
@@ -164,9 +170,8 @@ async function generateResponses(messageBatches, userMessageHistory, assistantMe
   for (const batch of messageBatches) {
     try {
       const response = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4-1106-preview',
         messages: [
-          { role: 'system', content: chatPrompt },
           ...userMessageHistory.map((message) => ({
             role: message.role,
             content: message.content,
@@ -176,6 +181,7 @@ async function generateResponses(messageBatches, userMessageHistory, assistantMe
             content: message.content,
           })),
           { role: 'user', content: batch },
+          { role: 'system', content: `${userPrompt}\n\n${systemMessage}` },
         ],
         temperature: 0.7,
         max_tokens: 750,

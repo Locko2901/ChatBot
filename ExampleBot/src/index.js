@@ -11,14 +11,16 @@ const client = new Client({
     ],
 });
 
-const serverUserMessageEndpoint = 'http://localhost:4000/userMessage'; // Endpoint to send user messages
-const serverAssistantResponseEndpoint = 'http://localhost:4000/assistantResponse'; // Endpoint to receive responses
+const serverUserMessageEndpoint = 'http://localhost:4000/userMessage'; 
+const serverAssistantResponseEndpoint = 'http://localhost:4000/assistantResponse'; 
 
 const eventEmitter = new EventEmitter();
 
+const messageQueue = [];
+let isProcessing = false;
+
 client.on('ready', () => {
     console.log(`${client.user.tag} is online.`);
-    client.user.setActivity('PlaceholderText', { type: 'PLAYING' }); //set type and activity to your liking
 });
 
 client.on('messageCreate', async (message) => {
@@ -30,8 +32,12 @@ client.on('messageCreate', async (message) => {
     const lowerCaseMessage = message.content.toLowerCase();
 
     if (lowerCaseMessage.includes(targetContent.toLowerCase()) || message.mentions.has(client.user)) {
+        if (message.mentions.everyone || message.mentions.here) {
+            return;
+        }
+
         const messageContent = `${message.author.username}:${message.content}`;
-        
+
         const data = {
             userQuery: messageContent,
             server: message.guild.name, 
