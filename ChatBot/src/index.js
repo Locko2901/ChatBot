@@ -17,8 +17,8 @@ const eventEmitter = new EventEmitter();
 let sharedConversationHistory = loadConversationHistoryFromFile();
 
 // Define the maximum history size and maximum message count
-const maxHistorySize = 10 * 1024 * 1024; // Maximum size in bytes (e.g., 10 MB)
-const maxMessageCount = 1000; // Maximum number of messages
+const maxHistorySize = 1 * 1024 * 1024; // Maximum size in bytes (e.g., 1 MB)
+const maxMessageCount = 25; // Maximum number of messages
 
 pruneConversationHistory(sharedConversationHistory, maxHistorySize, maxMessageCount);
 
