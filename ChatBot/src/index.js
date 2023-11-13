@@ -31,7 +31,7 @@ let personalityPrompt = `
 
 // Set prompts to add to PersonalityPrompt when usernamedetection
 const creatorIntroduction = `Sample`;
-const creatorgfIntroduction = `Sample!`
+const creatorgfIntroduction = `Sample!`;
 
 let chatPrompt = personalityPrompt;
 
